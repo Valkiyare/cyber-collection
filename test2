@@ -1,29 +1,60 @@
-
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-import math
+import signal
+import threading
 
-class CircularMotion(Node):
+class SquareWalker(Node):
     def __init__(self):
-        super().__init__('circular_motion')
-        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.timer = self.create_timer(0.1, self.publish_twist)
+        super().__init__('square_walker')
+        self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.rate = self.create_rate(10)  # 10 Hz
         self.linear_vel = 0.2  # linear velocity in m/s
         self.angular_vel = 0.5  # angular velocity in radians/s
 
-    def publish_twist(self):
-        msg = Twist()
-        msg.linear.x = self.linear_vel
-        msg.angular.z = self.angular_vel
-        self.publisher_.publish(msg)
+    def move_forward(self):
+        desired_velocity = Twist()
+        desired_velocity.linear.x = self.linear_vel
+        for _ in range(30):  # Move for a duration to cover a side of the square
+            self.publisher.publish(desired_velocity)
+            self.rate.sleep()
 
-def main(args=None):
-    rclpy.init(args=args)
-    circular_motion = CircularMotion()
-    rclpy.spin(circular_motion)
-    circular_motion.destroy_node()
-    rclpy.shutdown()
+    def turn_left(self):
+        desired_velocity = Twist()
+        desired_velocity.angular.z = self.angular_vel
+        for _ in range(15):  # Rotate for a duration to turn 90 degrees
+            self.publisher.publish(desired_velocity)
+            self.rate.sleep()
 
-if __name__ == '__main__':
+    def trace_square(self):
+        for _ in range(4):  # Repeat for each side of the square
+            self.move_forward()
+            self.turn_left()
+        # Stop at the end of tracing the square
+        self.stop()
+
+    def stop(self):
+        desired_velocity = Twist()
+        self.publisher.publish(desired_velocity)
+
+def main():
+    def signal_handler(sig, frame):
+        square_walker.stop()
+        rclpy.shutdown()
+
+    rclpy.init(args=None)
+    square_walker = SquareWalker()
+
+    signal.signal(signal.SIGINT, signal_handler)
+    thread = threading.Thread(target=rclpy.spin, args=(square_walker,), daemon=True)
+    thread.start()
+
+    try:
+        while rclpy.ok():
+            square_walker.trace_square()
+    except rclpy.exceptions.ROSInterruptException:
+        pass
+
+
+if __name__ == "__main__":
     main()
