@@ -1,0 +1,29 @@
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+import math
+
+class CircularMotion(Node):
+    def __init__(self):
+        super().__init__('circular_motion')
+        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.timer = self.create_timer(0.1, self.publish_twist)
+        self.linear_vel = 0.2  # linear velocity in m/s
+        self.angular_vel = 0.5  # angular velocity in radians/s
+
+    def publish_twist(self):
+        msg = Twist()
+        msg.linear.x = self.linear_vel
+        msg.angular.z = self.angular_vel
+        self.publisher_.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    circular_motion = CircularMotion()
+    rclpy.spin(circular_motion)
+    circular_motion.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
