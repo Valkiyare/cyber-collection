@@ -1,53 +1,70 @@
-# Part B - Stitching images.
-
 import threading
-import sys, time
+import sys
 import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, Vector3
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
-from std_msgs.msg import UInt32
-from cv_bridge import CvBridge, CvBridgeError
+from cv_bridge import CvBridge
 from rclpy.exceptions import ROSInterruptException
 import signal
+
 
 class imageStitcher(Node):
     def __init__(self):
 
         super().__init__('imageStitcher')
 
-        # Initialise a publisher to publish messages to the robot base
-        # We covered which topic receives messages that move the robot in the 3rd Lab Session
-
+        # Initialize a publisher to publish messages to the robot base
         self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.rate = self.create_rate(10)  # 10 Hz
 
-        # Remember to initialise a CvBridge() and set up a subscriber to the image topic you wish to use
+        # Initialize CvBridge for image conversion
         self.bridge = CvBridge()
-        self.subscription = self.create_subscription(Image, '/camera/image_raw', self.callback, 10)
-        self.subscription  # prevent unused variable warning
 
+        # Initialize flags for image capture
+        self.image1_captured = False
+        self.image2_captured = False
+
+        # Initialize variables for image storage
+        self.image1 = None
+        self.image2 = None
+
+        # Initialize angle increment for robot rotation
+        self.angle_increment = np.pi / 18  # 10 degrees in radians
 
     def callback(self, data):
-        # Convert the received image into a opencv image
-        # But remember that you should always wrap a call to this conversion method in an exception handler
-        image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
-        cv2.namedWindow('camera_Feed',cv2.WINDOW_NORMAL)
+        # Convert the received image into a OpenCV image
+        try:
+            image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+        except CvBridgeError as e:
+            print(e)
+
+        # Display the received image
         cv2.imshow('camera_Feed', image)
-        cv2.resizeWindow('camera_Feed',320,240)
-        
+        cv2.resizeWindow('camera_Feed', 320, 240)
+        cv2.waitKey(3)
 
-        # You can use openCV to detect if a key is pressed
-        # cv2.waitkey() will return a value > -1 if a key is pressed
-        # You can test if a particular key is pressed using the ord method.
-        # For example if key = ord("i"): would test key i was pressed
-
+        # Check if a key has been pressed
         key = cv2.waitKey(3)
+        if key == ord('c'):  # 'c' key is pressed for capturing the image
+            if not self.image1_captured:
+                self.image1 = image.copy()  # Capture the first image
+                self.image1_captured = True
+                print("First image captured.")
+            elif not self.image2_captured:
+                self.image2 = image.copy()  # Capture the second image
+                self.image2_captured = True
+                print("Second image captured.")
+
+        # If both images are captured, stop capturing more images and start stitching
+        if self.image1_captured and self.image2_captured:
+            print("Both images captured.")
+            self.stop()  # Stop capturing more images
+            self.performStitch()  # Start stitching process
 
     def rotate_robot(self):
-
         # Initialize unused components of desired velocity to zero
         desired_velocity = Twist()
         desired_velocity.linear.x = 0.
@@ -56,126 +73,126 @@ class imageStitcher(Node):
         desired_velocity.angular.x = 0.
         desired_velocity.angular.y = 0.
 
+        # Set desired angle increment for robot rotation
+        desired_angle = self.angle_increment
 
-        # Set desired angle in radians
-        # desired_velocity..... =
+        # Store current time
+        t0 = self.get_clock().now().seconds_nanoseconds()
 
-        # store current time: t0
-        t0, _ = self.get_clock().now().seconds_nanoseconds()
-
+        # Loop to publish the velocity estimate until desired angle is achieved
         current_angle = 0
-
-        # loop to publish the velocity estimate until desired angle achieved
-        # current angle = current angular velocity * (t1 - t0)
-        while (current_angle < self.angle_r):
+        while current_angle < desired_angle:
             # Publish the velocity
             self.publisher.publish(desired_velocity)
 
-            # t1 is the current time
-            t1, _ = self.get_clock().now().seconds_nanoseconds()  # to_msg()
+            # Store current time
+            t1 = self.get_clock().now().seconds_nanoseconds()
 
             # Calculate current angle
-            # current_angle =
+            current_angle = abs((t1 - t0) * desired_velocity.angular.z)
 
             self.rate.sleep()
 
-        # set velocity to zero to stop the robot
+        # Stop the robot after desired angle is achieved
         self.stop()
 
-
     def performStitch(self):
-        # Initialize the SIFT feature detector and extractor
+        # Convert images to grayscale
+        gray1 = cv2.cvtColor(self.image1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(self.image2, cv2.COLOR_BGR2GRAY)
 
+        # Initialize SIFT feature detector and extractor
+        sift = cv2.SIFT_create()
 
         # Detect keypoints and compute descriptors for both images
+        keypoints1, descriptors1 = sift.detectAndCompute(gray1, None)
+        keypoints2, descriptors2 = sift.detectAndCompute(gray2, None)
 
+        # Initialize brute-force matcher
+        bf = cv2.BFMatcher()
 
-        # Draw keypoints on the images
+        # Match descriptors using brute-force matcher
+        matches = bf.match(descriptors1, descriptors2)
 
+        # Sort matches by distance
+        matches = sorted(matches, key=lambda x: x.distance)
 
-        # Display the images with keypoints
+        # Draw top 10 matches
+        matched_image = cv2.drawMatches(self.image1, keypoints1, self.image2, keypoints2, matches[:10], None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
 
+        # Display matched image
+        cv2.imshow("Top 10 matches", matched_image)
+        cv2.waitKey(0)
 
-        # Initialize the feature matcher using brute-force matching
+        # Extract matched keypoints
+        src_pts = np.float32([keypoints1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([keypoints2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
 
-
-        # Match the descriptors using brute-force matching
-
-
-        # Sort the matches by distance (lower is better)
-
-
-        # Draw the top N matches
-
-
-        # Display the images with matches
-
-
-        # Estimate the homography matrix using RANSAC
-
-
-        # Print the estimated homography matrix
-
+        # Estimate homography using RANSAC
+        H, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC)
 
         # Warp the first image using the homography
+        warped_image = cv2.warpPerspective(self.image1, H, (self.image2.shape[1] + self.image1.shape[1], self.image2.shape[0]))
 
+        # Blend the warped image with the second image using alpha blending
+        result = cv2.addWeighted(warped_image[:, :self.image2.shape[1]], 0.5, self.image2, 0.5, 0)
 
-        # Blending the warped image with the second image using alpha blending
-
-
-
-        # Display the blended image
-        
-        return
-
+        # Display the stitched image
+        cv2.imshow("Stitched Image", result)
+        cv2.waitKey(0)
 
     def stop(self):
+        # Stop the robot
         desired_velocity = Twist()
         desired_velocity.linear.x = 0.0  # Send zero velocity to stop the robot
         self.publisher.publish(desired_velocity)
 
-        
 
-# Create a node of your class in the main and ensure it stays up and running
-# handling exceptions and such
 def main():
-
-    
     def signal_handler(sig, frame):
         stitcher.stop()
         rclpy.shutdown()
 
-    # Instantiate your class
-    # and rclpy.init the entire node
-    
+    # Initialize the ROS node
     rclpy.init(args=None)
+
+    # Create an instance of the imageStitcher class
     stitcher = imageStitcher()
-    
+
+    # Setup signal handler for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
+
+    # Spin the node in a separate thread
     thread = threading.Thread(target=rclpy.spin, args=(stitcher,), daemon=True)
     thread.start()
 
     try:
+        # Keep the node running until interrupted
         while rclpy.ok():
+            # Capture the first image
+            if not stitcher.image1_captured:
+                print("Capturing first image.")
+                # Delay to ensure the camera is ready for capture
+                time.sleep(2)
+                stitcher.rotate_robot()
 
-            # check if a key has been pressed and store the current image
+            # Capture the second image
+            if not stitcher.image2_captured:
+                print("Capturing second image.")
+                # Delay to ensure the camera is ready for capture
+                time.sleep(2)
+                stitcher.rotate_robot()
 
-            # When you have an image rotate the robot
-            # stitcher.robot_rotate()
-
-                
-            # Once you have both images we can try to stitch them together
-            # but make sure you don't capture any more images
-            # stitcher.performStitch()
-            pass
-
+            # If both images are captured, stop the loop
+            if stitcher.image1_captured and stitcher.image2_captured:
+                break
 
     except ROSInterruptException:
-            pass
+        pass
 
-    # Remember to destroy all image windows before closing node
+    # Clean up OpenCV windows before closing the node
     cv2.destroyAllWindows()
 
-# Check if the node is executing in the main path
+
 if __name__ == '__main__':
     main()
