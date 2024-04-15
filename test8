@@ -1,0 +1,53 @@
+import threading
+import sys
+import cv2
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+from rclpy.exceptions import ROSInterruptException
+import signal
+
+
+class colourIdentifier(Node):
+    def __init__(self):
+        super().__init__('cI')
+
+        self.bridge = CvBridge()
+        self.subscription = self.create_subscription(Image, '/camera/image_raw', self.callback, 10)
+
+        # Initialize flags for detecting colors
+        self.green_detected = False
+
+        # Set sensitivity for color detection
+        self.sensitivity = 10
+
+    def callback(self, data):
+        try:
+            # Convert ROS Image message to OpenCV image
+            image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+        except CvBridgeError as e:
+            print(e)
+
+        # Set upper and lower bounds for the color you wish to identify (green)
+        hsv_green_lower = np.array([60 - self.sensitivity, 100, 100])
+        hsv_green_upper = np.array([60 + self.sensitivity, 255, 255])
+
+        # Convert the RGB image into a HSV image
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        # Create a mask to filter out everything but the green color
+        mask = cv2.inRange(hsv_image, hsv_green_lower, hsv_green_upper)
+
+        # Apply the mask to the original image
+        masked_image = cv2.bitwise_and(image, image, mask=mask)
+
+        # Find contours of green objects
+        contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours:
+            # Loop over the contours
+            for contour in contours:
+                # Calculate the area of each contour
+                area = cv2.contourArea(contour
