@@ -50,4 +50,50 @@ class colourIdentifier(Node):
             # Loop over the contours
             for contour in contours:
                 # Calculate the area of each contour
-                area = cv2.contourArea(contour
+                area = cv2.contourArea(contour)
+
+                # If the area is above a certain threshold, consider it a detected object
+                if area > 1000:  # Adjust this threshold as needed
+                    self.green_detected = True
+
+                    # You could publish a message to the lab2 talker/listener here if needed
+                    # Or simply print a message indicating detection
+                    print("Green object detected!")
+
+        # Show the resultant images
+        cv2.imshow('Original Image', image)
+        cv2.imshow('Masked Image', masked_image)
+        cv2.waitKey(3)
+
+
+def main():
+    def signal_handler(sig, frame):
+        rclpy.shutdown()
+
+    # Initialize the ROS node
+    rclpy.init(args=None)
+
+    # Create an instance of the colourIdentifier class
+    cI = colourIdentifier()
+
+    # Setup signal handler for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Spin the node in a separate thread
+    thread = threading.Thread(target=rclpy.spin, args=(cI,), daemon=True)
+    thread.start()
+
+    try:
+        # Keep the node running until interrupted
+        while rclpy.ok():
+            continue
+    except ROSInterruptException:
+        pass
+
+    # Clean up OpenCV windows before closing the node
+    cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    main()
+
